@@ -29,44 +29,79 @@ def main(args):
 	    raise ValueError(f"Task type must be in {task_types}")
 	if args.algo not in accepted_algos:
 	    raise ValueError(f"Algo must be in {accepted_algos}")
-	if args.problem_main == 'qucb' and args.task_type == 'multi':
-		raise ValueError(f"Multi-task qUCB not supported")
-	
 
 	if args.problem_main == 'DTLZ1':
 		problem_main = DTLZ1
 
 	problem_list = []
 	corr = 0
-	for i in range(args.n_problems):
+	for i in range(args.n_problem):
 		problem_list.append(DTLZ1(n_var=6, delta1 = 1, delta2 = corr, delta3 = 1, negate=True))
 		corr+=0.1
 	
 	opt = MTBO(problem_list)
 
-	results_all = []
-	for trial in range(1, args.n_trial+1):
-		print(f"Trial {trial}/{args.n_trial}")
+	if args.run_all: # everything
+
+		results1, results2, results3, results4, results5, results6, results7, results8 = [], [], [], [], [], [], [], []
 		
-		results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch, n_init=args.n_init,
-						  task_type=args.task_type, algo=args.algo, random_state=trial)
-		results_all.append(results)
+		for trial in range(1, args.n_trial+1):
+			print(f"Trial {trial}/{args.n_trial}")
+			opt.initialize(n_init=args.n_init, random_state=trial)
 
-	results_all = np.array(results_all)
+			for taskalgo, results_list in zip([('multi','egbo'), ('multi','qnehvi'),
+											   ('multi','qnparego'), ('multi','qucb'),
+											   ('single','egbo'), ('single','qnehvi'),
+											   ('single','qnparego'), ('single','qucb'),
+											  ],
+											 
+											 [results1, results2, results3, results4,
+											  results5, results6, results7, results8]
+											 ):
 
-	if args.label == '':
-		today = datetime.now().strftime("%d-%m-%y--%H:%M")
-		joblib.dump(results_all, f'{today}')
+				task_type, algo = taskalgo
+				results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch,
+								  task_type=task_type, algo=algo, random_state=trial)
+				results_list.append(results)
+			
+		
+		for taskalgo, results_list in zip([('multi','egbo'), ('multi','qnehvi'),
+										   ('multi','qnparego'), ('multi','qucb'),
+										   ('single','egbo'), ('single','qnehvi'),
+										   ('single','qnparego'), ('single','qucb'),
+										  ],
+										 
+										 [results1, results2, results3, results4,
+										  results5, results6, results7, results8]
+										 ):
+			task_type, algo = taskalgo
+			results_list = np.array(results_list)
+			joblib.dump(results_list, f'{task}-{algo}')
 
-	else:
-		joblib.dump(results_all, f'{args.label}')
+	else: # single runs
+		results_all = []
+		for trial in range(1, args.n_trial+1):
+			print(f"Trial {trial}/{args.n_trial}")
+			
+			results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch, n_init=args.n_init,
+							  task_type=args.task_type, algo=args.algo, random_state=trial)
+			results_all.append(results)
+	
+		results_all = np.array(results_all)
+	
+		if args.label == '':
+			today = datetime.now().strftime("%d-%m-%y--%H:%M")
+			joblib.dump(results_all, f'{today}')
+	
+		else:
+			joblib.dump(results_all, f'{args.label}')
 
 	print("Done!")
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--problem_main', required=True)
-	parser.add_argument('--n_problems', required=True, type=int)
+	parser.add_argument('--n_problem', required=True, type=int)
 
 	parser.add_argument('--n_trial', default=5, type=int)
 	parser.add_argument('--n_iter', default=10, type=int)
@@ -76,6 +111,8 @@ if __name__ == '__main__':
 	parser.add_argument('--task_type', default='multi', type=str)
 	parser.add_argument('--algo', default='qnehvi', type=str)
 	parser.add_argument('--label', default='', type=str)
+
+	parser.add_argument('--run_all', default=False)
 	
 	args = parser.parse_args()
 	main(args)
