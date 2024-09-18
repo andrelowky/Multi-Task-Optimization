@@ -11,6 +11,7 @@ from pymoo.algorithms.moo.unsga3 import UNSGA3
 from pymoo.util.ref_dirs import get_reference_directions
 from pymoo.optimize import minimize
 from pymoo.core.problem import Problem as PymooProblem
+from pymoo.core.population import Population
 from pymoo.core.termination import NoTermination
 
 tkwargs = {"dtype": torch.double,
@@ -99,9 +100,9 @@ def optimize_st_egbo(acq_func, ref_pt, x, y, batch_size, n_sampling=256):
 
     print(pareto_y.shape)
 	# set the 1st population to the current evaluated population
-    pop = nsga.ask()
-    pop.set("F", pareto_y.cpu().numpy())
-    nsga.tell(infills=pop)
+	pop = Population.new("X", pareto_x)
+	pop.set("F", pareto_y.cpu().numpy())
+	nsga.tell(infills=pop)
 
 	# propose children based on tournament selection -> crossover/mutation
     newpop = nsga.ask()
@@ -150,7 +151,7 @@ def optimize_mt_egbo(acq_func, ref_pt, x, task, y, batch_size, n_sampling=256):
     nsga.setup(pymooproblem, termination=NoTermination())
 
 	# set the 1st population to the current evaluated population
-    pop = nsga.ask()
+    pop = Population.new("X", pareto_x)
     pop.set("F", pareto_y)
     nsga.tell(infills=pop)
 
