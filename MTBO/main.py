@@ -10,7 +10,7 @@ from botorch import fit_gpytorch_mll
 from MTBO.sampling import LHS
 from MTBO.utils import calc_hv, update_values
 from MTBO.models import initialize_model_st, initialize_model_mt
-from MTBO.acq_func import mt_qnehvi, mt_qnparego, st_qnehvi, st_qnparego, st_qucb
+from MTBO.acq_func import mt_qnehvi, mt_qnparego, mt_qucb, st_qnehvi, st_qnparego, st_qucb
 from MTBO.optim import optimize_mt_list, optimize_mt_mixed, optimize_st_list, optimize_st_acqf, optimize_st_egbo, optimize_mt_egbo
 
 tkwargs = {"dtype": torch.double,
@@ -45,9 +45,12 @@ class MTBO():
 		f"Multi-Task: MT-qNEHVI, MT-qNEHVI(EGBO), MT-qNParEGO\n"
 		f"Single-Task: ST-qNEHVI, ST-qNEHVI(EGBO), ST-qNParEGO, ST-qUCB"
 		)
-		
 
-	def run(self, n_iter, n_batch, n_init, task_type, algo, random_state=np.random.randint(99999)):
+	def initialize(self, n_init, random_state=np.random.randint(99999)):
+		self.init_x, self.init_task, self.init_y = LHS(self.problems, n_init)
+
+	def run(self, n_iter, n_batch, task_type, algo, random_state=np.random.randint(99999)):
+		print(f"Optimizing for {task_type}-{algo}")
 
 		torch.manual_seed(random_state)
 		np.random.seed(random_state)
@@ -56,7 +59,7 @@ class MTBO():
 		
 		#### initialization ####
 		
-		train_x, train_task, train_y = LHS(self.problems, n_init)
+		train_x, train_task, train_y = self.init_x, self.init_task, self.init_y
 		volumes = calc_hv(train_y, train_task, self.hv, self.problems)
 		results.append(volumes)
 		
@@ -85,12 +88,15 @@ class MTBO():
 				
 				if algo == 'qnehvi':
 					acq = mt_qnehvi(model, self.ref_pt, x_gp, train_task)
-					candidates =  optimize_mt_mixed(acq, self.acq_bounds, n_batch)
+					candidates =  optimize_mt_mixed(acq, self.acq_bounds, n_batch*self.n_task)
 				elif algo == 'egbo':
 					acq = mt_qnehvi(model, self.ref_pt, x_gp, train_task)
-					candidates = optimize_mt_egbo(acq, self.ref_pt, x_gp, train_task, train_y, n_batch)
+					candidates = optimize_mt_egbo(acq, self.ref_pt, x_gp, train_task, train_y, n_batch*self.n_task)
 				elif algo == 'qnparego':
-					acq = mt_qnparego(model, x_gp, train_task, n_batch, self.n_obj)
+					acq = mt_qnparego(model, x_gp, train_task, n_batch*self.n_task, self.n_obj)
+					candidates = optimize_mt_list(acq, self.acq_bounds)
+				elif algo == 'qucb':
+					acq = mt_qucb(model, x_gp, train_task, n_batch*self.n_task, self.n_obj)
 					candidates = optimize_mt_list(acq, self.acq_bounds)
 				
 				new_x = unnormalize(candidates[:,:-1], self.prob_bounds)

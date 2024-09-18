@@ -18,7 +18,7 @@ tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
 
 def optimize_mt_list(acq_func_list, acq_bounds):
-	# for qnparego
+	# for qnparego and qucb
 	
 	candidates, _ = optimize_acqf_list(
 		acq_function_list=acq_func_list,
@@ -33,7 +33,7 @@ def optimize_mt_list(acq_func_list, acq_bounds):
 	return candidates
 
 def optimize_mt_mixed(acq_func, acq_bounds, batch_size):
-	# for mt qnehvi and qucb
+	# for mt qnehvi
 	
 	candidates, _ = optimize_acqf_mixed(
 		acq_function=acq_func,
@@ -98,11 +98,10 @@ def optimize_st_egbo(acq_func, ref_pt, x, y, batch_size, n_sampling=256):
 
     nsga.setup(pymooproblem, termination=NoTermination())
 
-    print(pareto_y.shape)
 	# set the 1st population to the current evaluated population
-	pop = Population.new("X", pareto_x)
-	pop.set("F", pareto_y.cpu().numpy())
-	nsga.tell(infills=pop)
+    pop = Population.new("X", pareto_x.cpu().numpy())
+    pop.set("F", pareto_y.cpu().numpy())
+    nsga.tell(infills=pop)
 
 	# propose children based on tournament selection -> crossover/mutation
     newpop = nsga.ask()
