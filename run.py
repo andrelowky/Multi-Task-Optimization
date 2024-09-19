@@ -15,9 +15,9 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from MTBO.main import MTBO
-from MTBO.problems import DTLZ1
+from MTBO.problems import DTLZ1, DTLZ2
 
-accepted_problems = ['DTLZ1']
+accepted_problems = ['DTLZ1', 'DTLZ2']
 accepted_task_types = ['multi', 'single']
 accepted_algos = ['qnehvi', 'egbo', 'qnparego', 'qucb']
 
@@ -32,6 +32,8 @@ def main(args):
 
 	if args.problem_main == 'DTLZ1':
 		problem_main = DTLZ1
+	elif args.problem_main == 'DTLZ2':
+		problem_main = DTLZ2
 
 	problem_list = []
 	corr = 0
@@ -76,7 +78,7 @@ def main(args):
 										 ):
 			task_type, algo = taskalgo
 			results_list = np.array(results_list)
-			joblib.dump(results_list, f'{task}-{algo}')
+			joblib.dump(results_list, f'{task_type}-{algo}')
 
 	else: # single runs
 		results_all = []
