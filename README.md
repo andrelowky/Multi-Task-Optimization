@@ -18,3 +18,5 @@ To run all combinations of task type and algo, use the following command instead
 ```
 python run.py --problem_main=DTLZ1 --n_problems=3 --n_trial=5 --n_iter=10 --n_init=10 --n_batch=4 --run_all=True
 ```
+
+If you prefer to use Jupyter notebook, you can refer to demo.iypnb for an example on using MTBO.
