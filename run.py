@@ -78,7 +78,7 @@ def main(args):
 										 ):
 			task_type, algo = taskalgo
 			results_list = np.array(results_list)
-			joblib.dump(results_list, f'{task_type}-{algo}')
+			joblib.dump(results_list, f'{task_type}-{algo}-{args.label}')
 
 	else: # single runs
 		results_all = []
