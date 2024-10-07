@@ -36,82 +36,79 @@ def main(args):
 		problem_main = DTLZ2
 
 	problem_list = []
-	corr = 0
+	delta2 = 0
 	for i in range(args.n_problem):
-		problem_list.append(DTLZ1(n_var=6, delta1 = 1, delta2 = corr, delta3 = 1, negate=True))
-		corr+=0.1
-	
+		problem_list.append(DTLZ1(n_var=args.n_var,
+								  delta1 = 1, delta2 = delta2, delta3 = 1,
+								  negate=True))
+		delta2+=args.corr
+		
 	opt = MTBO(problem_list)
 
 	if args.run_all: # everything
 
-		results1, results2, results3, results4, results5, results6, results7, results8 = [], [], [], [], [], [], [], []
+		results1, results2, results3, results4, results5, results6 = [], [], [], [], [], []
 		
 		for trial in range(1, args.n_trial+1):
+			
 			print(f"Trial {trial}/{args.n_trial}")
 			opt.initialize(n_init=args.n_init, random_state=trial)
 
-			for taskalgo, results_list in zip([('multi','egbo'), ('multi','qnehvi'),
-											   ('multi','qnparego'), ('multi','qucb'),
-											   ('single','egbo'), ('single','qnehvi'),
-											   ('single','qnparego'), ('single','qucb'),
-											  ],
-											 
-											 [results1, results2, results3, results4,
-											  results5, results6, results7, results8]
-											 ):
+			for taskalgo, results_list in zip(
+				[('multi', 'qnparego', 'standard'), ('multi','qucb','standard'), 
+				 ('multi', 'qnparego', 'ftgp'), ('multi','qucb','ftgp'), 
+				 ('single', 'qnparego','standard'), ('single','qucb','standard'),],
+				[results1, results2, results3, results4, results5, results6],
+			):
 
-				task_type, algo = taskalgo
+				task_type, algo, model_type = taskalgo
 				results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch,
-								  task_type=task_type, algo=algo, random_state=trial)
+								  task_type=task_type, algo=algo, model_type=model_type, random_state=trial)
 				results_list.append(results)
 			
-		
-		for taskalgo, results_list in zip([('multi','egbo'), ('multi','qnehvi'),
-										   ('multi','qnparego'), ('multi','qucb'),
-										   ('single','egbo'), ('single','qnehvi'),
-										   ('single','qnparego'), ('single','qucb'),
-										  ],
-										 
-										 [results1, results2, results3, results4,
-										  results5, results6, results7, results8]
-										 ):
-			task_type, algo = taskalgo
-			results_list = np.array(results_list)
-			joblib.dump(results_list, f'{task_type}-{algo}-{args.label}')
 
+		for taskalgo, results_list in zip(
+			[('multi', 'qnparego', 'standard'), ('multi','qucb','standard'), 
+			 ('multi', 'qnparego','ftgp'), ('multi','ftgp','qucb','ftgp'), 
+			 ('single', 'qnparego','standard'), ('single','qucb','standard'),],
+			[results1, results2, results3, results4, results5, results6],
+		):
+			task_type, algo, model_type = taskalgo
+			results_list = np.array(results_list)
+			joblib.dump(results_list, f'{args.problem_main}-results-{task_type}-{algo}-{model_type}-{args.label}')
+	
 	else: # single runs
 		results_all = []
 		for trial in range(1, args.n_trial+1):
 			print(f"Trial {trial}/{args.n_trial}")
-			
-			results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch, n_init=args.n_init,
-							  task_type=args.task_type, algo=args.algo, random_state=trial)
+
+			opt.initialize(n_init=args.n_init, random_state=trial)
+			results = opt.run(n_iter=args.n_iter, n_batch=args.n_batch,
+							  task_type=args.task_type, algo=args.algo, model_type=args.model_type, random_state=trial)
 			results_all.append(results)
 	
 		results_all = np.array(results_all)
 	
-		if args.label == '':
-			today = datetime.now().strftime("%d-%m-%y--%H:%M")
-			joblib.dump(results_all, f'{today}')
+		joblib.dump(results_all, f'{args.problem_main}-results-{args.task_type}-{args.algo}-{args.model_type}-{args.label}')
 	
-		else:
-			joblib.dump(results_all, f'{args.label}')
-
+	
 	print("Done!")
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--problem_main', required=True)
-	parser.add_argument('--n_problem', required=True, type=int)
+	parser.add_argument('--problem_main', default='DTLZ1', type=str)
+	parser.add_argument('--n_problem', default=3, type=int)
+	parser.add_argument('--corr', default=0.05, type=int)
+	parser.add_argument('--n_var', default=6, type=int)
 
 	parser.add_argument('--n_trial', default=5, type=int)
-	parser.add_argument('--n_iter', default=10, type=int)
-	parser.add_argument('--n_batch', default=4, type=int)
-	parser.add_argument('--n_init', default=10, type=int)
+	parser.add_argument('--n_iter', default=4, type=int)
+	parser.add_argument('--n_batch', default=2, type=int)
+	parser.add_argument('--n_init', default=36, type=int)
 	
 	parser.add_argument('--task_type', default='multi', type=str)
 	parser.add_argument('--algo', default='qnehvi', type=str)
+	parser.add_argument('--model_type', default='standard', type=str)
 	parser.add_argument('--label', default='', type=str)
 
 	parser.add_argument('--run_all', default=False)
