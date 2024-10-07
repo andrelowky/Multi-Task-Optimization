@@ -14,52 +14,53 @@ from pymoo.core.problem import Problem as PymooProblem
 from pymoo.core.population import Population
 from pymoo.core.termination import NoTermination
 
+raw_samples = 256
+
 tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
 
-def optimize_mt_list(acq_func_list, acq_bounds):
+def optimize_list(acq_func_list, bounds):
 	# for qnparego and qucb
 	
 	candidates, _ = optimize_acqf_list(
 		acq_function_list=acq_func_list,
-		bounds=acq_bounds,
-		fixed_features_list=[{acq_bounds.shape[1]-1: task_idx} 
-							 for task_idx in range(int(acq_bounds[1, -1])+1)],
+		bounds=bounds,
 		num_restarts=2,
-		raw_samples=128,
+		raw_samples=raw_samples,
 		options={"batch_limit": 5, "maxiter": 200},
 		)
 
 	return candidates
 
-def optimize_mt_mixed(acq_func, acq_bounds, batch_size):
+def optimize_fixed_list(acq_func_list, bounds, n_task):
+	# for qnparego and qucb
+	
+	candidates, _ = optimize_acqf_list(
+		acq_function_list=acq_func_list,
+		fixed_features_list=[{bounds.shape[1]-1: task_idx} for task_idx in range(n_task)],
+		bounds=bounds,
+		num_restarts=2,
+		raw_samples=raw_samples,
+		options={"batch_limit": 5, "maxiter": 200},
+		)
+
+	return candidates
+
+def optimize_mt_mixed(acq_func, acq_bounds, batch_size, n_task):
 	# for mt qnehvi
 	
 	candidates, _ = optimize_acqf_mixed(
 		acq_function=acq_func,
 		bounds=acq_bounds,
 		q=batch_size,
-		fixed_features_list=[{acq_bounds.shape[1]-1: task_idx} 
-							 for task_idx in range(int(acq_bounds[1, -1])+1)],
+		fixed_features_list=[{bounds.shape[1]-1: task_idx} for task_idx in range(n_task)],
 		num_restarts=2,
-		raw_samples=128,
+		raw_samples=raw_samples,
 		options={"batch_limit": 5, "maxiter": 200},
 		)
 
 	return candidates
 
-def optimize_st_list(acq_func_list, std_bounds):
-	# for st qnparego
-	
-	candidates, _ = optimize_acqf_list(
-		acq_function_list=acq_func_list,
-		bounds=std_bounds,
-		num_restarts=2,
-		raw_samples=128,
-		options={"batch_limit": 5, "maxiter": 200},
-		)
-
-	return candidates
 
 def optimize_st_acqf(acq_func, batch_size, std_bounds):
 	# for st qnehvi and qucb
@@ -69,7 +70,7 @@ def optimize_st_acqf(acq_func, batch_size, std_bounds):
         bounds=std_bounds,
         q=batch_size,
         num_restarts=2,
-        raw_samples=128,  # used for intialization heuristic
+        raw_samples=raw_samples,  # used for intialization heuristic
         options={"batch_limit": 5, "maxiter": 200},
         sequential=True,
     )
@@ -77,7 +78,7 @@ def optimize_st_acqf(acq_func, batch_size, std_bounds):
     return candidates
 
 
-def optimize_st_egbo(acq_func, ref_pt, x, y, batch_size, n_sampling=256):
+def optimize_st_egbo(acq_func, x, y, batch_size):
 	# for st qnehvi
 
 	# we pick out the best points so far to form parents
@@ -86,21 +87,19 @@ def optimize_st_egbo(acq_func, ref_pt, x, y, batch_size, n_sampling=256):
     pareto_x = x[pareto_mask]
 	
     nsga = UNSGA3(
-		pop_size=n_sampling,
-		ref_dirs=get_reference_directions("energy", len(ref_pt), batch_size),
-		sampling=pareto_x.cpu().numpy()
+		pop_size=raw_samples,
+		ref_dirs=get_reference_directions("energy", y.shape[1], batch_size),
 	)
 	
     pymooproblem = PymooProblem(
-		n_var=x.shape[1], n_obj=len(ref_pt), 
+		n_var=x.shape[1], n_obj=y.shape[1], 
 		xl=np.zeros(x.shape[1]), xu=np.ones(x.shape[1])
 	)
 
     nsga.setup(pymooproblem, termination=NoTermination())
 
 	# set the 1st population to the current evaluated population
-    pop = Population.new("X", pareto_x.cpu().numpy())
-    pop.set("F", pareto_y.cpu().numpy())
+    pop = Population.new("X", pareto_x.cpu().numpy()).set("F", pareto_y.cpu().numpy())
     nsga.tell(infills=pop)
 
 	# propose children based on tournament selection -> crossover/mutation
@@ -122,62 +121,54 @@ def optimize_st_egbo(acq_func, ref_pt, x, y, batch_size, n_sampling=256):
 	
     return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
 
-def optimize_mt_egbo(acq_func, ref_pt, x, task, y, batch_size, n_sampling=256):
+def optimize_mt_egbo(acq_func, x, task, y, batch_size, n_obj):
 	# for mt qnehvi
-
-	# we pick out the best points so far to form parents
-    n_task = int(task.max())+1
-    
-    pareto_mask = is_non_dominated(y[(task==0).all(dim=1)])
-    pareto_y = -y[(task==0).all(dim=1)][pareto_mask].cpu().numpy() # i flip back to maximization
-    pareto_x = x[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
-    
-    for i in range(1, n_task+1):
-        pareto_mask = is_non_dominated(-y[(task==i).all(dim=1)])
-        pareto_y = np.vstack((pareto_y, -y[(task==i).all(dim=1)][pareto_mask].cpu().numpy())) # same here
-        pareto_x = np.vstack((pareto_x, x[(task==i).all(dim=1)][pareto_mask].cpu().numpy()))
-
-    nsga = UNSGA3(
-		pop_size=n_sampling,
-		ref_dirs=get_reference_directions("energy", len(ref_pt), batch_size),
-		sampling=pareto_x,
+	n_task = int(task.max())
+	
+	# we pick out the best points so far to form parents, from each task
+	pareto_mask = is_non_dominated(y[(task==0).all(dim=1)])
+	pareto_y = -y[(task==0).all(dim=1)][pareto_mask].cpu().numpy() # i flip back to maximization
+	pareto_x = x[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
+	pareto_task = task[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
+	
+	for i in range(1, n_task):
+		pareto_mask = is_non_dominated(-y[(task==i).all(dim=1)])
+		pareto_y = np.vstack([pareto_y, -y[(task==i).all(dim=1)][pareto_mask].cpu().numpy()]) # same here
+		pareto_x = np.vstack([pareto_x, x[(task==i).all(dim=1)][pareto_mask].cpu().numpy()])
+		pareto_task = np.vstack([pareto_task, task[(task==i).all(dim=1)][pareto_mask].cpu().numpy()])
+	
+	nsga = UNSGA3(
+		pop_size=raw_samples,
+		ref_dirs=get_reference_directions("energy", n_obj, batch_size),
 	)
-
-    pymooproblem = PymooProblem(n_var=x.shape[1], n_obj=len(ref_pt), 
-								xl=np.zeros(x.shape[1]),
-								xu=np.ones(x.shape[1]))
-
-    nsga.setup(pymooproblem, termination=NoTermination())
-
+	
+	xl = np.zeros(x.shape[1]+1)
+	xu = np.ones(x.shape[1]+1)
+	xu[-1] = int(task.max())
+	
+	pymooproblem = PymooProblem(n_var=x.shape[1], n_obj=len(ref_pt), xl=xl, xu=xu)
+	nsga.setup(pymooproblem, termination=NoTermination())
+	
 	# set the 1st population to the current evaluated population
-    pop = Population.new("X", pareto_x)
-    pop.set("F", pareto_y)
-    nsga.tell(infills=pop)
-
+	pop = Population.new("X", np.hstack([pareto_x, pareto_task])).set("F", pareto_y)
+	nsga.tell(infills=pop)
+	
 	# propose children based on tournament selection -> crossover/mutation
-    newpop = nsga.ask()
-    nsga3_x = torch.tensor(newpop.get("X"), **tkwargs)
-
-	# fill them back up with task index
-    candidates = nsga3_x.tile(n_task, 1)
-    candidate_task = torch.tensor(0, **tkwargs).repeat(n_sampling).reshape(-1,1)
-    for i in range(1, n_task):
-	    candidate_task = torch.vstack([candidate_task,
-	                                   torch.tensor(i, **tkwargs).repeat(n_sampling).reshape(-1,1)])
-	
-    candidates = torch.hstack([candidates, candidate_task])
+	newpop = nsga.ask()
+	candidates = torch.tensor(newpop.get("X"), **tkwargs)
+	candidates[:, -1] =  torch.floor(candidates[:, -1]) # round down last column which is task index
 	
 	##########
 	
-    acq_value_list = []
-
-    for i in range(0, candidates.shape[0]):
-        with torch.no_grad():
-            acq_value = acq_func(candidates[i].unsqueeze(dim=0))
-            acq_value_list.append(acq_value.item())
-
-    sorted_x = candidates.cpu().numpy()[np.argsort(acq_value_list)]
-
+	acq_value_list = []
+	
+	for i in range(0, candidates.shape[0]):
+		with torch.no_grad():
+			acq_value = acq_func(candidates[i].unsqueeze(dim=0))
+			acq_value_list.append(acq_value.item())
+	
+	sorted_x = candidates.cpu().numpy()[np.argsort(acq_value_list)]
+	
 	##########
 	
-    return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
+	return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
