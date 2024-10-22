@@ -44,10 +44,9 @@ def anchored_sampling(problems, n_samples, random_state):
     
     base_samples = int(n_samples/(2*len(problems)))
     remain_samples = int(n_samples/2)
-    power_2 = int(np.ceil(np.log(base_samples+remain_samples)/np.log(2)))
     
-    sampler = qmc.Sobol(d=problems[0].n_var, scramble=True)
-    samples = sampler.random_base2(m=power_2)
+    sampler = qmc.LatinHypercube(d=problems[0].n_var)
+    samples = sampler.random(n=base_samples+remain_samples)
     sample1 = samples[:base_samples]
     x1 = np.tile(sample1, (len(problems), 1))
     x2 = samples[base_samples:base_samples+int(n_samples/2)]
