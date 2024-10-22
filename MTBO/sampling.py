@@ -49,7 +49,7 @@ def anchored_sampling(problems, n_samples, random_state):
     samples = sampler.random(n=base_samples+remain_samples)
     sample1 = samples[:base_samples]
     x1 = np.tile(sample1, (len(problems), 1))
-    x2 = samples[base_samples:base_samples+int(n_samples/2)]
+    x2 = samples[base_samples:base_samples]
     tasks = np.repeat(np.arange(len(problems)), base_samples).reshape(-1,1)
     
     x = torch.tensor(np.vstack([x1, x2]), **tkwargs)
