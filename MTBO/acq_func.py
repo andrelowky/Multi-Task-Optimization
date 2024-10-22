@@ -125,7 +125,7 @@ def ftgp_qucb(model, x, task, batch_size, n_obj):
 		weights = sample_simplex(n_obj, **tkwargs).squeeze()
 		objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred)).to(device)
 		mtgp_acqf = qUpperConfidenceBound(model=model, objective=objective,
-										 beta=0.1, sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])))
+										 beta=0.2, sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])))
 		acq_func_list.append(mtgp_acqf)
 	
 	return acq_func_list

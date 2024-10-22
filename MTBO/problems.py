@@ -1,6 +1,11 @@
 import torch
 import numpy as np
 import math
+import joblib
+import os
+
+surrogate = joblib.load(f'{os.getcwd()}/MTBO/surrogate')
+yscaler = joblib.load(f'{os.getcwd()}/MTBO/yscaler')
 
 tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
@@ -76,3 +81,28 @@ class DTLZ2():
             return -1* torch.hstack([f1.unsqueeze(1), f2.unsqueeze(1), f3.unsqueeze(1)])
         else:
             return torch.hstack([f1.unsqueeze(1), f2.unsqueeze(1), f3.unsqueeze(1)])
+
+
+class asc16():
+	def __init__(self, delta1):
+		self.n_var = 5
+		self.n_obj = 2
+		self.delta1 = delta1
+	
+		bounds = torch.zeros((2, self.n_var), **tkwargs)
+		bounds[1] = 1
+		self.bounds = bounds
+	
+		self.ref_pt = torch.tensor([-1.1, 0], **tkwargs) 
+		self.hv_scaling = 1
+	
+	def evaluate(self, x):
+		x_np = x.cpu().numpy()
+		y = surrogate.predict(x_np)
+		y = yscaler.inverse_transform(y.reshape(1,-1))
+	
+		f1 = -x[:,1].unsqueeze(1) #temperature, to be minimized
+		f2 = torch.tensor(y, **tkwargs).reshape(-1, 1)
+		f2 = f2 + self.delta1
+		
+		return torch.hstack([f1, f2])

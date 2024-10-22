@@ -93,9 +93,9 @@ class TransferKernel(Kernel):
         return res
 
 class ExactGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood='gaussian', kernel='RBF'):  
+    def __init__(self, train_x, train_y, likelihood='gaussian', kernel='Matern52'):  
         if likelihood == 'gaussian':
-            likelihood_model = GaussianLikelihood(noise_constraint=Interval(lower_bound=1e-4,upper_bound=5))
+            likelihood_model = GaussianLikelihood(noise_constraint=Interval(lower_bound=1e-4,upper_bound=2))
         elif likelihood == 'gaussian_with_gamma_prior':
             noise_prior = GammaPrior(1.1, 0.05)
             noise_prior_mode = (noise_prior.concentration - 1) / noise_prior.rate
@@ -116,7 +116,7 @@ class ExactGPModel(gpytorch.models.ExactGP):
             self.covar_module = MaternKernel(
                                     nu=2.5,
                                     ard_num_dims=train_x.size(1),
-                                    lengthscale_prior=GammaPrior(3.0, 6.0)
+                                    lengthscale_prior=GammaPrior(2.0, 4.0)
                                 )
         elif kernel == 'ARDRBF':
             self.covar_module = gpytorch.kernels.RBFKernel(ard_num_dims=train_x.size(1))
@@ -133,9 +133,9 @@ class ExactGPModel(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class TransferGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, kernel='RBF'):
+    def __init__(self, train_x, train_y, likelihood='gaussian', kernel='Matern52'):
         if likelihood == 'gaussian':
-            likelihood_model = GaussianLikelihood(noise_constraint=Interval(lower_bound=1e-4,upper_bound=5))
+            likelihood_model = GaussianLikelihood(noise_constraint=Interval(lower_bound=1e-4,upper_bound=2))
         elif likelihood == 'gaussian_with_gamma_prior':
             noise_prior = GammaPrior(1.1, 0.05)
             noise_prior_mode = (noise_prior.concentration - 1) / noise_prior.rate
@@ -156,12 +156,12 @@ class TransferGPModel(gpytorch.models.ExactGP):
             self.covar_module = MaternKernel(
                                     nu=2.5,
                                     ard_num_dims=train_x[0].size(1),
-                                    lengthscale_prior=GammaPrior(3.0, 6.0)
+                                    lengthscale_prior=GammaPrior(2.0, 4.0)
                                 )                                
         elif kernel == 'ARDRBF':
             self.covar_module = gpytorch.kernels.RBFKernel(ard_num_dims=train_x[0].size(1))
         elif kernel == 'ARDRBF_with_gamma_prior':
-            self.covar_module = gpytorch.kernels.RBFKernel(ard_num_dims=train_x[0].size(1),lengthscale_prior=GammaPrior(3.0, 6.0))
+            self.covar_module = gpytorch.kernels.RBFKernel(ard_num_dims=train_x[0].size(1),lengthscale_prior=GammaPrior(2.0, 4.0))
         elif kernel == 'Matern52':
             self.covar_module = gpytorch.kernels.MaternKernel(nu=2.5)
         elif kernel == 'RBF':
@@ -177,7 +177,7 @@ class TransferGPModel(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar)
 
 class EnsembleFTGP(GPyTorchModel):
-	def __init__(self, train_x, train_task, train_y, likelihood='gaussian', kernel='RBF'):
+	def __init__(self, train_x, train_task, train_y, likelihood='gaussian', kernel='Matern52'):
 		super().__init__()
 		self.kernel = kernel
 		self.likelihood_type = likelihood
@@ -192,7 +192,7 @@ class EnsembleFTGP(GPyTorchModel):
 		self.n_var = train_x.shape[1]
 		self._num_outputs = 1
 		
-		self.n_epoch = 200
+		self.n_epoch = 500
 
 	@property
 	def num_outputs(self) -> int:
@@ -218,7 +218,7 @@ class EnsembleFTGP(GPyTorchModel):
 			mll = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model)
 			
 			optimizer = Minimizer(model.parameters(),method='l-bfgs',
-								  tol=1e-6, max_iter=200, disp=0)
+								  tol=1e-6, max_iter=self.n_epoch, disp=0)
 			def closure():
 				optimizer.zero_grad()
 				output = model(x)
@@ -263,7 +263,7 @@ class EnsembleFTGP(GPyTorchModel):
 
 					mll = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model)
 					optimizer = Minimizer(model.parameters(),method='l-bfgs',
-										  tol=1e-6, max_iter=200, disp=0)
+										  tol=1e-6, max_iter=self.n_epoch, disp=0)
 					def closure():
 						optimizer.zero_grad()
 						output = model(x, task)
@@ -317,29 +317,29 @@ class EnsembleFTGP(GPyTorchModel):
 			
 			M = len(predictions_s)
 			# Prediction of the factorized TGP
-			predicted_variance_inv_temp = torch.stack([1 / predictions_s[j].variance for j in range(M)]).sum(axis=0)
-			predicted_variance_inv = predicted_variance_inv_temp + (1 - M) * 1.0 / prediction_t.variance
-			predicted_variance_FTGP = 1 / predicted_variance_inv
-			predicted_mean_FTGP = 0
+			predicted_variance_inv_temp = torch.stack([1 / torch.clamp(predictions_s[j].variance, min=1e-6) for j in range(M)]).sum(axis=0)
+			predicted_variance_inv = predicted_variance_inv_temp + (1 - M) * 1.0 / torch.clamp(prediction_t.variance, min=1e-6)
+			predicted_variance_FTGP = 1 / torch.clamp(predicted_variance_inv, min=1e-6)
+			predicted_mean_FTGP = torch.zeros_like(predicted_variance_FTGP)
 			for j in range(M):
-				predicted_mean_FTGP += (predictions_s[j].mean / predictions_s[j].variance)
-			predicted_mean_FTGP += (1 - M) * (prediction_t.mean / prediction_t.variance)
+				predicted_mean_FTGP += (predictions_s[j].mean / torch.clamp(predictions_s[j].variance, min=1e-6))
+			predicted_mean_FTGP += (1 - M) * (prediction_t.mean / torch.clamp(prediction_t.variance, min=1e-6))
 			predicted_mean_FTGP = predicted_mean_FTGP * predicted_variance_FTGP
 			
 			# If the standard dev provided by factorized TGP is not positive, provided the predictions by using generalized product of experts (GPOE)
-			predicted_variance_GPOE = M / predicted_variance_inv_temp
-			predicted_mean_GPOE = 0
+			predicted_variance_GPOE = M / torch.clamp(predicted_variance_inv_temp, min=1e-6)
+			predicted_mean_GPOE = torch.zeros_like(predicted_variance_GPOE)
 			for j in range(M):
-				predicted_mean_GPOE += (predictions_s[j].mean / predictions_s[j].variance)
+				predicted_mean_GPOE += (predictions_s[j].mean / torch.clamp(predictions_s[j].variance, min=1e-6))
 			predicted_mean_GPOE = predicted_mean_GPOE * predicted_variance_GPOE / M
 			
 			# If not positive, use GPOE
-			mean = (predicted_variance_inv > 0) * predicted_mean_FTGP + (predicted_variance_inv <= 0) * predicted_mean_GPOE
-			variance = (predicted_variance_inv > 0) * predicted_variance_FTGP + (predicted_variance_inv <= 0) * predicted_variance_GPOE
+			mean = torch.where(predicted_variance_inv > 0, predicted_mean_FTGP, predicted_mean_GPOE)
+			variance = torch.where(predicted_variance_inv > 0, predicted_variance_FTGP, predicted_variance_GPOE)
 			
 			mean, variance = self.outcome_transform.untransform(mean, variance)
 			means.append(mean)
-			variances.append(variance)
+			variances.append(torch.clamp(variance, min=1e-6))
 
 		# Combine predictions for all tasks
 		if transform_y:

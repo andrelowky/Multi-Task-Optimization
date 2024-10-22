@@ -18,19 +18,21 @@ def calc_hv(y, task, hv, problems, negate=True, hv_scale=10000):
     return np.array(volume_list)
 
 def update_values(old_tensors, new_tensors, problems):
-    old_x, old_task, old_y = old_tensors
-    new_x, new_task = new_tensors
-
-    for i, problem in enumerate(problems):
-        added_x = new_x[(new_task==i).all(dim=1)]
-        added_task = new_task[(new_task==i).all(dim=1)]
-        added_y = problem.evaluate(added_x)
-    
-        old_x = torch.cat([old_x, added_x])
-        old_task = torch.cat([old_task, added_task])
-        old_y = torch.cat([old_y, added_y])
-
-    return old_x, old_task, old_y
+	old_x, old_task, old_y = old_tensors
+	new_x, new_task = new_tensors
+	
+	for i, problem in enumerate(problems):
+		added_x = new_x[(new_task==i).all(dim=1)]
+		if added_x.shape[0] == 0:
+			continue;
+		added_task = new_task[(new_task==i).all(dim=1)]
+		added_y = problem.evaluate(added_x)
+	
+		old_x = torch.cat([old_x, added_x])
+		old_task = torch.cat([old_task, added_task])
+		old_y = torch.cat([old_y, added_y])
+	
+	return old_x, old_task, old_y
 
 
 def calc_losses(model, mll):
