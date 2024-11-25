@@ -7,6 +7,8 @@ import pandas as pd
 from botorch.utils.transforms import unnormalize, normalize
 from botorch.utils.multi_objective.hypervolume import Hypervolume
 from botorch import fit_gpytorch_mll
+from botorch.utils.sampling import draw_sobol_samples
+
 
 from MTBO.sampling import anchored_sampling
 from MTBO.utils import calc_hv, update_values, calc_losses
@@ -49,24 +51,7 @@ class MTBO():
 		self.random_state = random_state
 		self.n_init = n_init
 		self.init_x, self.init_task, self.init_y = anchored_sampling(self.problems, n_init, self.random_state)
-
-	def run_random(self, n_iter, n_batch):
-		print(f"Performing random search")
-		self.did_validation = False
-		self.task_type = 'single'
-		self.run_iter = n_iter
-		self.run_batch = n_batch
-
-		
-		self.train_x, self.train_task, self.train_y = self.init_x, self.init_task, self.init_y
-		self.x_gp = normalize(self.train_x, self.prob_bounds)   
-		volumes = calc_hv(self.train_y, self.train_task, self.hv, self.problems)
-		self.results.append(volumes)	
-		
-		print(f"Batch 0 - avg HV:{volumes.mean():.4f}")
-		
-		for iter in range(1, n_iter+1):
-			t2 = time.monotonic()
+	
 	def run(self, n_iter, n_batch, 
 			task_type, algo, model_type='mtgp',
 		   ):
@@ -249,30 +234,37 @@ class MTBO():
 				new_x = []
 				all_losses = []
 				for i in range(self.n_task):
-
-					x_gp_i = self.x_gp[(self.train_task==i).all(dim=1)]
-					train_y_i = self.train_y[(self.train_task==i).all(dim=1)]
-	
-					model, mll = initialize_model_st(x_gp_i, train_y_i)
-					fit_gpytorch_mll(mll)
-					all_losses.append(calc_losses(model, mll))
-
-					if algo == 'qnehvi':
-						acq = st_qnehvi(model, self.ref_pt, x_gp_i)
-						candidates = optimize_st_acqf(acq, n_batch_per_task, self.std_bounds)
 					
-					elif algo == 'qnehvi-egbo':
-						acq = st_qnehvi(model, self.ref_pt, x_gp_i)
-						candidates = optimize_st_egbo(acq, x_gp_i, train_y_i, n_batch_per_task)
-					
-					elif algo == 'qnparego':
-						acq = st_qnparego(model, x_gp_i, n_batch_per_task, self.n_obj)
-						candidates = optimize_st_list(acq, self.std_bounds)
-					elif algo == 'qucb':
-						acq = st_qucb(model, x_gp_i, n_batch_per_task, self.n_obj)
-						candidates = optimize_st_list(acq, self.std_bounds)
+					if algo == 'random':
+						model, acq = None, None
+						all_losses.append(0)
+						new_x_i = draw_sobol_samples(bounds=self.prob_bounds, 
+													 n=n_batch_per_task, q=1).squeeze(1)	
+
+						new_x.append(new_x_i.cpu().numpy())
+
+					else:
+						x_gp_i = self.x_gp[(self.train_task==i).all(dim=1)]
+						train_y_i = self.train_y[(self.train_task==i).all(dim=1)]
+		
+						model, mll = initialize_model_st(x_gp_i, train_y_i)
+						fit_gpytorch_mll(mll)
+						all_losses.append(calc_losses(model, mll))
 	
-					new_x.append(unnormalize(candidates, self.prob_bounds).cpu().numpy())
+						if algo == 'qnehvi':
+							acq = st_qnehvi(model, self.ref_pt, x_gp_i)
+							candidates = optimize_st_acqf(acq, n_batch_per_task, self.std_bounds)
+						elif algo == 'qnehvi-egbo':
+							acq = st_qnehvi(model, self.ref_pt, x_gp_i)
+							candidates = optimize_st_egbo(acq, x_gp_i, train_y_i, n_batch_per_task)
+						elif algo == 'qnparego':
+							acq = st_qnparego(model, x_gp_i, n_batch_per_task, self.n_obj)
+							candidates = optimize_st_list(acq, self.std_bounds)
+						elif algo == 'qucb':
+							acq = st_qucb(model, x_gp_i, n_batch_per_task, self.n_obj)
+							candidates = optimize_st_list(acq, self.std_bounds)
+		
+						new_x.append(unnormalize(candidates, self.prob_bounds).cpu().numpy())
 
 				self.losses.append(all_losses)
 			
