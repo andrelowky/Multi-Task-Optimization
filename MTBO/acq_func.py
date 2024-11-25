@@ -144,38 +144,3 @@ def ftgp_qucb(model, x, task, batch_size, n_obj):
 		acq_func_list.append(mtgp_acqf)
 	
 	return acq_func_list
-
-def mt2o(model, x):
-
-    with torch.no_grad():
-        pred = model.posterior(x).mean
-    
-    acq_func_list = []
-    
-    weights = sample_simplex(pred.shape[1], **tkwargs).squeeze()
-    objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred))
-    acqf = qLogNoisyExpectedImprovement(
-        model=model,
-        X_baseline=x,
-        objective=objective,
-        prune_baseline=True, 
-    )
-
-    return acqf
-
-def get_total_weights(task, batch_size, n_obj):
-
-    n_task = int(task.max())+1
-    # first create the weights for each task
-    weights = []
-    
-    for i in range(n_task):
-        indices = [j * n_task + i for j in range(n_obj)]
-        
-        for _ in range(batch_size):
-            sample_tensor = torch.zeros(n_obj * n_task, **tkwargs)
-            simplex_point = torch.tensor(np.random.dirichlet(np.ones(n_obj)), **tkwargs)
-            sample_tensor[indices] = simplex_point
-            weights.append(sample_tensor)
-
-    return weights

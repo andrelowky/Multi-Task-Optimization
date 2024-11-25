@@ -13,8 +13,9 @@ from botorch.utils.sampling import draw_sobol_samples
 from MTBO.sampling import anchored_sampling
 from MTBO.utils import calc_hv, update_values, calc_losses
 from MTBO.models import initialize_model_st, initialize_model_mt, initialize_fit_model_ftgp
-from MTBO.acq_func import st_qnehvi, st_qnparego, st_qucb, mt_qnehvi, mt_qnparego, mt_qucb, mt_qucb_balanced, mt2o
-from MTBO.optim import optimize_st_list, optimize_mt_list_flexi, optimize_mt_list_fixed, optimize_mt_mixed_flexi, optimize_mt_mixed_fixed, optimize_st_acqf, optimize_st_egbo, optimize_mt_egbo, optimize_mt_egbo_list, optimize_mt_egbo_fixed, optimize_mt_sobol, optimize_mt_mt2o_egbo
+from MTBO.acq_func import st_qnehvi, st_qnparego, st_qucb, mt_qnehvi, mt_qnparego, mt_qucb, mt_qucb_balanced
+from MTBO.optim import optimize_st_list,  optimize_st_acqf, optimize_st_egbo
+from MTBO.optim import optimize_mt_list_flexi, optimize_mt_list_fixed, optimize_mt_mixed_flexi, optimize_mt_mixed_fixed, optimize_mt_egbo_flexi, optimize_mt_egbo_fixed, optimize_mt_sobol
 
 tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
@@ -53,9 +54,9 @@ class MTBO():
 		self.init_x, self.init_task, self.init_y = anchored_sampling(self.problems, n_init, self.random_state)
 	
 	def run(self, n_iter, n_batch, 
-			task_type, algo, model_type='mtgp',
+			task_type, algo,
 		   ):
-		print(f"Optimizing for {task_type}-{algo}-{model_type}")
+		print(f"Optimizing for {task_type}-{algo}")
 
 		self.did_validation = False
 		self.task_type = task_type
@@ -84,15 +85,10 @@ class MTBO():
 			t2 = time.monotonic()
 		
 			if task_type == 'multi-flexi':
-
-				if model_type=='mtgp':
 				
-					model, mll = initialize_model_mt(self.x_gp, self.train_task, self.train_y)
-					fit_gpytorch_mll(mll)
-					self.losses.append(calc_losses(model, mll))
-
-				else:
-					model = initialize_fit_model_ftgp(self.x_gp, self.train_task, self.train_y)
+				model, mll = initialize_model_mt(self.x_gp, self.train_task, self.train_y)
+				fit_gpytorch_mll(mll)
+				self.losses.append(calc_losses(model, mll))
 
 				if algo == 'qnehvi':
 					acq = mt_qnehvi(model, self.ref_pt, self.x_gp, self.train_task)
@@ -102,7 +98,7 @@ class MTBO():
 
 				elif algo == 'qnehvi-egbo':
 					acq = mt_qnehvi(model, self.ref_pt, self.x_gp, self.train_task)
-					candidates = optimize_mt_egbo(acq, self.x_gp, self.train_task, self.train_y, n_batch)
+					candidates = optimize_mt_egbo_flexi(acq, self.x_gp, self.train_task, self.train_y, n_batch)
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
 
@@ -118,21 +114,9 @@ class MTBO():
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
 
-				elif algo == 'qnparego-egbo':
-					acq = mt_qnparego(model, self.x_gp, self.train_task, self.n_task, self.n_obj)
-					candidates = optimize_mt_egbo_list(acq, self.x_gp, self.train_task, self.train_y, n_batch)
-					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
-					new_task = candidates[:,-1].unsqueeze(1)
-					
 				elif algo == 'qucb':
 					acq = mt_qucb(model, self.x_gp, self.train_task, n_batch, self.n_obj)
 					candidates = optimize_mt_list_flexi(acq, self.acq_bounds, self.n_task)
-					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
-					new_task = candidates[:,-1].unsqueeze(1)
-
-				elif algo == 'qucb-egbo':
-					acq = mt_qucb_balanced(model, self.x_gp, self.train_task, self.n_obj)
-					candidates = optimize_mt_egbo(acq, self.x_gp, self.train_task, self.train_y, n_batch)
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
 
@@ -142,11 +126,6 @@ class MTBO():
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
 
-				elif algo == 'mt2o-egbo':
-					acq = mt2o(model, self.x_gp)
-					candidates = optimize_mt_mt2o_egbo(acq, self.x_gp, self.train_task, self.train_y, n_batch)
-					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
-					new_task = candidates[:,-1].unsqueeze(1)
 			
 			elif task_type == 'multi-fixed':
 				if n_batch < self.n_task:
@@ -154,14 +133,9 @@ class MTBO():
 
 				n_batch_per_task = int(n_batch/self.n_task)
 
-				if model_type=='mtgp':
-				
-					model, mll = initialize_model_mt(self.x_gp, self.train_task, self.train_y)
-					fit_gpytorch_mll(mll)
-					self.losses.append(calc_losses(model, mll))
-
-				else:
-					model = initialize_fit_model_ftgp(self.x_gp, self.train_task, self.train_y)
+				model, mll = initialize_model_mt(self.x_gp, self.train_task, self.train_y)
+				fit_gpytorch_mll(mll)
+				self.losses.append(calc_losses(model, mll))
 
 				if algo == 'qnehvi':
 					acq = mt_qnehvi(model, self.ref_pt, self.x_gp, self.train_task)
@@ -175,16 +149,10 @@ class MTBO():
 				elif algo == 'qnehvi-egbo':
 					acq = mt_qnehvi(model, self.ref_pt, self.x_gp, self.train_task)
 					candidates = []
-					for task_idx in range(self.n_task):
-						x_gp_i = self.x_gp[(self.train_task==task_idx).all(dim=1)]
-						train_task_i = self.train_task[(self.train_task==task_idx).all(dim=1)]
-						train_y_i = self.train_y[(self.train_task==task_idx).all(dim=1)]
-						candidates_i = optimize_mt_egbo_fixed(acq, 
-															  x_gp_i, train_y_i, 
-															  task_idx, n_batch_per_task)
-						candidates.append(candidates_i.cpu().numpy())
+					candidates = optimize_mt_egbo_fixed(acq,
+														self.x_gp, self.train_task, self.train_y,
+														n_batch_per_task)
 
-					candidates = torch.tensor(np.array(candidates), **tkwargs).reshape(-1, self.n_var+1)
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
 
@@ -205,22 +173,7 @@ class MTBO():
 					candidates = torch.tensor(np.array(candidates), **tkwargs).reshape(-1, self.n_var+1)				
 					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
 					new_task = candidates[:,-1].unsqueeze(1)
-
-				elif algo == 'qucb-egbo':
-					acq = mt_qucb_balanced(model, self.x_gp, self.train_task, self.n_obj)
-					candidates = []
-					for task_idx in range(self.n_task):
-						x_gp_i = self.x_gp[(self.train_task==task_idx).all(dim=1)]
-						train_task_i = self.train_task[(self.train_task==task_idx).all(dim=1)]
-						train_y_i = self.train_y[(self.train_task==task_idx).all(dim=1)]
-						candidates_i = optimize_mt_egbo_fixed(acq, 
-															  x_gp_i, train_y_i, 
-															  task_idx, n_batch_per_task)
-						candidates.append(candidates_i.cpu().numpy())
-
-					candidates = torch.tensor(np.array(candidates), **tkwargs).reshape(-1, self.n_var+1)
-					new_x = unnormalize(candidates[:,:-1], self.prob_bounds)
-					new_task = candidates[:,-1].unsqueeze(1)					
+								
 			
 			elif task_type == 'single':
 				if n_batch < self.n_task:
