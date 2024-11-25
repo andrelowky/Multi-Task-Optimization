@@ -1,17 +1,18 @@
 import torch
 import numpy as np
 import math
-import joblib
-import os
 
-surrogate = joblib.load(f'{os.getcwd()}/MTBO/surrogate')
-yscaler = joblib.load(f'{os.getcwd()}/MTBO/yscaler')
+#import joblib
+#import os
+
+#surrogate = joblib.load(f'{os.getcwd()}/MTBO/surrogate')
+#yscaler = joblib.load(f'{os.getcwd()}/MTBO/yscaler')
 
 tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
 
 class DTLZ1():
-    def __init__(self, n_var = 10, delta1 = 1, delta2 = 0, delta3 = 1, negate=True):
+    def __init__(self, n_var = 8, delta1 = 1, delta2 = 0, delta3 = 1, negate=True):
         self.n_var = n_var
         self.n_obj = 3
         self.negate = negate
@@ -47,7 +48,7 @@ class DTLZ1():
 
 
 class DTLZ2():
-    def __init__(self, n_var = 10, delta1 = 1, delta2 = 0, delta3 = 1, negate=True):
+    def __init__(self, n_var = 8, delta1 = 1, delta2 = 0, delta3 = 1, negate=True):
         self.n_var = n_var
         self.n_obj = 3
         self.negate = negate
@@ -82,7 +83,7 @@ class DTLZ2():
         else:
             return torch.hstack([f1.unsqueeze(1), f2.unsqueeze(1), f3.unsqueeze(1)])
 
-
+'''
 class asc16():
 	def __init__(self, delta1):
 		self.n_var = 5
@@ -106,3 +107,34 @@ class asc16():
 		f2 = f2 + self.delta1
 		
 		return torch.hstack([f1, f2])
+'''
+
+class ZDT1():
+	def __init__(self, n_var = 8, delta1 = 0, negate=True):
+		self.n_var = n_var
+		self.n_obj = 2
+		self.negate = negate
+	
+		bounds = torch.zeros((2, n_var), **tkwargs)
+		bounds[1] = 1
+		self.bounds = bounds
+	
+		if self.negate:
+		   self.ref_pt = torch.tensor([-11, -11], **tkwargs) 
+		else:
+			self.ref_pt = torch.tensor([11, 1], **tkwargs)
+				
+		self.delta1 = delta1
+	
+		self.hv_scaling = 1
+	
+	def evaluate(self, x):
+	
+		f1 = x[:, 0] + self.delta1
+		g = 1 + 9.0 / (self.n_var - 1 - self.delta1) * torch.sum(x[:, 1:], axis=1)
+		f2 = g * (1 - torch.pow((f1 / g), 0.5))
+	
+		if self.negate:
+			return -1* torch.hstack([f1.unsqueeze(1), f2.unsqueeze(1)])
+		else:
+			return torch.hstack([f1.unsqueeze(1), f2.unsqueeze(1)])

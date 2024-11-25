@@ -20,7 +20,9 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.util.ref_dirs import get_reference_directions
 from sklearn.preprocessing import MinMaxScaler
 
-raw_samples = 256
+from botorch.utils.sampling import draw_sobol_samples
+
+raw_samples = 512
 
 tkwargs = {"dtype": torch.double,
            "device": torch.device("cuda:0" if torch.cuda.is_available() else "cpu")}
@@ -129,6 +131,31 @@ def optimize_st_egbo(acq_func, x, y, batch_size):
 	
 	off = SBX().do(pymooproblem, parents)
 	candidates = torch.tensor(off.get("X"), **tkwargs)
+		
+	acq_value_list = [acq_func(candidates[i].unsqueeze(dim=0)).detach().item()
+					  for i in range(candidates.shape[0])]
+	sorted_x = candidates.cpu().numpy()[np.argsort(acq_value_list)]
+	
+	return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
+
+def optimize_mt_egbo_fixed(acq_func, x, y, task_i, batch_size):
+	# for st qnehvi
+	
+	pareto_mask = is_non_dominated(y)
+	pareto_x = x[pareto_mask].cpu().numpy()
+	
+	pymooproblem = PymooProblem(n_var=x.shape[1], xl=np.zeros(x.shape[1]), xu=np.ones(x.shape[1]))
+	
+	parents = [
+		[Individual(X=pareto_x[np.random.choice(pareto_x.shape[0])]),
+		 Individual(X=pareto_x[np.random.choice(pareto_x.shape[0])])] 
+	for _ in range(int(raw_samples/2))]
+	
+	off = SBX().do(pymooproblem, parents)
+	candidates = torch.tensor(off.get("X"), **tkwargs)
+	candidates = torch.hstack([candidates, 
+							   torch.tensor(task_i, **tkwargs).repeat(candidates.shape[0]).unsqueeze(1)])
+
 		
 	acq_value_list = [acq_func(candidates[i].unsqueeze(dim=0)).detach().item()
 					  for i in range(candidates.shape[0])]
@@ -280,3 +307,88 @@ def optimize_mt_egbo_list(acq_func, x, task, y, batch_size):
 	sorted_x = candidates.cpu().numpy()[np.argsort(acq_value_list)]
 	
 	return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
+
+def optimize_mt_sobol(acq_func, batch_size, acq_bounds):
+
+    candidates = draw_sobol_samples(bounds=acq_bounds, n=raw_samples, q=1).squeeze(1)
+    candidates[:,-1] = torch.round(candidates[:,-1])
+
+    acq_value_list = [acq_func(candidates[i].unsqueeze(dim=0)).detach().item()
+                      for i in range(candidates.shape[0])]
+    sorted_x = candidates.cpu().numpy()[np.argsort(acq_value_list)]
+
+    return torch.tensor(sorted_x[-batch_size:], **tkwargs) # take best BATCH_SIZE samples
+
+def optimize_mt_mt2o_egbo(acq_func, x, task, y, batch_size):
+    n_tasks = int(task.max()+1)
+    
+    pareto_mask = is_non_dominated(y[(task==0).all(dim=1)])
+    pareto_x = x[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
+    pareto_task = task[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
+    pareto_y = y[(task==0).all(dim=1)][pareto_mask].cpu().numpy()
+    
+    for i in range(1, int(task.max())+1):
+        pareto_mask = is_non_dominated(y[(task==i).all(dim=1)])
+        pareto_x = np.vstack([pareto_x, x[(task==i).all(dim=1)][pareto_mask].cpu().numpy()])
+        pareto_task = np.vstack([pareto_task, task[(task==i).all(dim=1)][pareto_mask].cpu().numpy()])
+        pareto_y = np.vstack([pareto_y, y[(task==i).all(dim=1)][pareto_mask].cpu().numpy()])
+    
+    
+    ref_dirs = get_reference_directions("energy", y.shape[1]+1, n_tasks)
+    for i in range(y.shape[1]):
+        if y[0,i] < 0: # ensure correct direction if we have minimization objectives
+            ref_dirs[:,i] = -ref_dirs[:,i]
+    
+    # we select for pareto solutions which are spread in both y and task space
+    scaler = MinMaxScaler()
+    pareto_y_task = scaler.fit_transform(np.hstack([pareto_y, pareto_task]))
+    pareto_x_task = np.hstack([pareto_x, pareto_task])
+    
+    def assign_ref(ref_vectors, points):
+        distances = np.linalg.norm(points[:, np.newaxis] - ref_vectors, axis=2)
+        nearest_indices = np.argmin(distances, axis=1)
+        assignments = ref_vectors[nearest_indices]
+    
+        return np.expand_dims(nearest_indices, -1)
+    
+    ref_idx = assign_ref(ref_dirs, pareto_y_task)
+    
+    parents = []
+    
+    for i in range(int(raw_samples/2)):
+        rand_idx = np.random.choice(1)
+        pool_a = pareto_x_task[(ref_idx==rand_idx).all(axis=1)]
+        while pool_a.shape[0] == 0:
+            rand_idx = np.random.randint(1)
+            pool_a = pareto_x_task[(ref_idx==rand_idx).all(axis=1)]
+        pool_b = pareto_x_task[(ref_idx!=rand_idx).all(axis=1)]
+        if pool_b.shape[0] == 0:
+            pool_b = pool_a
+    
+        a = Individual(X=pool_a[np.random.choice(pool_a.shape[0])])
+        b = Individual(X=pool_b[np.random.choice(pool_b.shape[0])])
+        parents.append([a,b])
+    
+    xl = np.zeros(x.shape[1]+1)
+    xu = np.ones(x.shape[1]+1)
+    xu[-1] = int(task.max())
+    pymooproblem = PymooProblem(n_var=x.shape[1]+1, xl=xl, xu=xu)
+    off = SBX(prob=1.0, prob_var=1.0).do(pymooproblem, parents)
+    off = PolynomialMutation(prob=1.0)(pymooproblem, off)
+    
+    off_x = torch.tensor(off.get('X')[:,:-1], **tkwargs) # remove old task indicator
+    acq_value_list = [acq_func(off_x[i].unsqueeze(dim=0)).detach().item()
+                      for i in range(off_x.shape[0])]
+    sorted_x = off_x.cpu().numpy()[np.argsort(acq_value_list)]
+    
+    # assign task indicator column to inherit either of parents
+    off_task = []
+    for i in range(len(parents)):
+        parent_task = np.array([parents[i][0].get('X')[-1], parents[i][1].get('X')[-1]])
+        off_task.append(np.random.choice(parent_task, 2).reshape(-1))
+    
+    off_task = torch.tensor(np.array(off_task).reshape(-1,1), **tkwargs)
+    sorted_task = off_task.cpu().numpy()[np.argsort(acq_value_list)]
+    candidates = torch.tensor(np.hstack([sorted_x, sorted_task]), **tkwargs)
+    
+    return candidates[-batch_size:] # take best BATCH_SIZE samples

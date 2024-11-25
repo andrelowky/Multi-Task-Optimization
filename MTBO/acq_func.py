@@ -46,13 +46,28 @@ def mt_qucb(model, x, task, batch_size, n_obj):
         objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred))
         stgp_acqf = qUpperConfidenceBound(
                     model=model,
-                    beta=0.1,
+                    beta=5.0,
                     objective=objective,
 					sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])),)
         acq_func_list.append(stgp_acqf)
 
     return acq_func_list
+
+def mt_qucb_balanced(model, x, task, n_obj):
+
+    with torch.no_grad():
+        pred = model.posterior(torch.hstack([x, task])).mean
     
+    weights = (torch.ones(n_obj, **tkwargs)/n_obj).squeeze()
+    objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred))
+    acqf = qUpperConfidenceBound(
+                model=model,
+                beta=5.0,
+                objective=objective,
+                sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])),)
+
+    return acqf
+
 def mt_qnehvi(model, ref_pt, x, task):
 
     acq_func = qNoisyExpectedHypervolumeImprovement(
@@ -106,7 +121,7 @@ def st_qucb(model, x, batch_size, n_obj):
         objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred))
         stgp_acqf = qUpperConfidenceBound(
                     model=model,
-                    beta=0.1,
+                    beta=5.0,
                     objective=objective,
 					sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])),)
         acq_func_list.append(stgp_acqf)
@@ -125,10 +140,28 @@ def ftgp_qucb(model, x, task, batch_size, n_obj):
 		weights = sample_simplex(n_obj, **tkwargs).squeeze()
 		objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred)).to(device)
 		mtgp_acqf = qUpperConfidenceBound(model=model, objective=objective,
-										 beta=0.2, sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])))
+										 beta=5.0, sampler=SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES])))
 		acq_func_list.append(mtgp_acqf)
 	
 	return acq_func_list
+
+def mt2o(model, x):
+
+    with torch.no_grad():
+        pred = model.posterior(x).mean
+    
+    acq_func_list = []
+    
+    weights = sample_simplex(pred.shape[1], **tkwargs).squeeze()
+    objective = GenericMCObjective(get_chebyshev_scalarization(weights=weights, Y=pred))
+    acqf = qLogNoisyExpectedImprovement(
+        model=model,
+        X_baseline=x,
+        objective=objective,
+        prune_baseline=True, 
+    )
+
+    return acqf
 
 def get_total_weights(task, batch_size, n_obj):
 
